@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Doodle Jump Modern</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="page">
+    <h1 class="title">🚀 Doodle Jump <span>Modern</span></h1>
+
+    <div class="game-shell">
+      <div class="game-frame" id="gameFrame">
+        <canvas id="gameCanvas"></canvas>
+
+        <div class="hud">
+          <div class="pill score" id="scorePill">0</div>
+          <div class="pill best" id="bestPill">Best 0</div>
+        </div>
+
+        <div class="overlay" id="overlay">
+          <h2 id="overlayTitle">🚀 Doodle Jump</h2>
+          <p id="overlayScore" class="overlay-score hidden"></p>
+          <p id="overlayHint" class="overlay-hint">
+            Use ← → or A/D to move, or the on-screen buttons on mobile.
+            Bounce on platforms and climb as high as you can!
+          </p>
+          <button id="playBtn" class="play-btn">Play</button>
+        </div>
+      </div>
+
+      <div class="touch-controls">
+        <button id="leftBtn" class="touch-btn" aria-label="Move left">&larr;</button>
+        <button id="rightBtn" class="touch-btn" aria-label="Move right">&rarr;</button>
+      </div>
+    </div>
+
+    <p class="footer-note">No install, no build step — just open <code>index.html</code> and play.</p>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
