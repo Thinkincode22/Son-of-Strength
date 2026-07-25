@@ -1,6 +1,14 @@
 (() => {
   'use strict';
 
+  // === TELEGRAM WEB APP ===
+  const tg = window.Telegram?.WebApp;
+  if (tg) {
+    tg.ready();
+    tg.expand();
+    tg.disableVerticalSwipes();
+  }
+
   // === CONSTANTS ===
   const GAME_WIDTH = 400;
   const GAME_HEIGHT = 600;
@@ -257,6 +265,11 @@
     state = 'playing';
     gameFrame.classList.add('playing');
     overlay.classList.add('hidden-overlay');
+
+    // Telegram: hide share button
+    if (tg) {
+      tg.MainButton.hide();
+    }
   }
 
   // === END GAME ===
@@ -280,6 +293,15 @@
     overlayHint.classList.add('hidden');
     playBtn.textContent = 'Грати знову';
     overlay.classList.remove('hidden-overlay');
+
+    // Telegram: show share button
+    if (tg) {
+      tg.MainButton.setText(`Поділитись: ${finalScore} очок`);
+      tg.MainButton.show();
+      tg.MainButton.onClick(() => {
+        tg.switchInlineQuery(`Мій рекорд у Котигорошко: ${finalScore} очок! Спробуй побити!`, ['users', 'groups']);
+      });
+    }
 
     playTone(220, 0.25, 'sawtooth', 0.08);
     setTimeout(() => playTone(140, 0.35, 'sawtooth', 0.08), 120);
