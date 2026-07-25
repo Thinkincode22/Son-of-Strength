@@ -1,17 +1,20 @@
 (() => {
   'use strict';
 
+  // === CONSTANTS ===
   const GAME_WIDTH = 400;
   const GAME_HEIGHT = 600;
-  const GRAVITY = 0.28;
-  const JUMP_VELOCITY = -10.5;
-  const SPRING_VELOCITY = -17;
-  const MOVE_SPEED = 4.2;
-  const PLAYER_RADIUS = 16;
-  const PLATFORM_WIDTH = 62;
-  const PLATFORM_HEIGHT = 14;
-  const HIGH_SCORE_KEY = 'doodle-jump-modern-highscore';
+  const GRAVITY = 0.35;
+  const JUMP_VELOCITY = -12;
+  const SPRING_VELOCITY = -18;
+  const MOVE_SPEED = 5;
+  const PLAYER_WIDTH = 60;
+  const PLAYER_HEIGHT = 90;
+  const PLATFORM_WIDTH = 70;
+  const PLATFORM_HEIGHT = 25;
+  const HIGH_SCORE_KEY = 'kotyhiroshko-highscore';
 
+  // === DOM ELEMENTS ===
   const canvas = document.getElementById('gameCanvas');
   const ctx = canvas.getContext('2d');
   const gameFrame = document.getElementById('gameFrame');
@@ -25,11 +28,59 @@
   const leftBtn = document.getElementById('leftBtn');
   const rightBtn = document.getElementById('rightBtn');
 
+  // === CANVAS SETUP ===
   const dpr = window.devicePixelRatio || 1;
   canvas.width = GAME_WIDTH * dpr;
   canvas.height = GAME_HEIGHT * dpr;
   ctx.scale(dpr, dpr);
 
+  // === SPRITES ===
+  const sprites = {};
+  const spritePaths = {
+    playerIdle: 'assets/player/idle.png',
+    playerJump: 'assets/player/jump.png',
+    playerFall: 'assets/player/fall.png',
+    playerVictory: 'assets/player/victory.png',
+    platformWood: 'assets/platforms/wood.png',
+    platformGold: 'assets/platforms/gold.png',
+    platformSpring: 'assets/platforms/spring.png',
+    platformBreaking: 'assets/platforms/breaking.png',
+    platformTrident: 'assets/platforms/trident.png',
+    enemySnake: 'assets/enemies/snake.png',
+    enemyDragon: 'assets/enemies/dragon.png',
+    enemyGolem: 'assets/enemies/golem.png',
+    enemySpike: 'assets/enemies/spike.png',
+    uiPea: 'assets/ui/pea.png',
+  };
+
+  let spritesLoaded = false;
+  let loadedCount = 0;
+  const totalSprites = Object.keys(spritePaths).length;
+
+  function loadSprites(callback) {
+    for (const [name, path] of Object.entries(spritePaths)) {
+      const img = new Image();
+      img.onload = () => {
+        loadedCount++;
+        if (loadedCount === totalSprites) {
+          spritesLoaded = true;
+          callback();
+        }
+      };
+      img.onerror = () => {
+        console.warn(`Failed to load: ${path}`);
+        loadedCount++;
+        if (loadedCount === totalSprites) {
+          spritesLoaded = true;
+          callback();
+        }
+      };
+      img.src = path;
+      sprites[name] = img;
+    }
+  }
+
+  // === AUDIO ===
   let audioCtx = null;
   function getAudio() {
     if (!audioCtx) {
@@ -40,22 +91,25 @@
     return audioCtx;
   }
 
-  function playTone(freq, duration, type = 'sine', startGain = 0.15) {
+  function playTone(freq, duration, type = 'sine', gain = 0.1) {
     try {
       const ac = getAudio();
       const osc = ac.createOscillator();
-      const gain = ac.createGain();
+      const g = ac.createGain();
       osc.type = type;
       osc.frequency.setValueAtTime(freq, ac.currentTime);
-      gain.gain.setValueAtTime(startGain, ac.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + duration);
-      osc.connect(gain);
-      gain.connect(ac.destination);
+      g.gain.setValueAtTime(gain, ac.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + duration);
+      osc.connect(g);
+      g.connect(ac.destination);
       osc.start();
       osc.stop(ac.currentTime + duration);
-    } catch {
-      /* audio may be blocked until user interaction */
-    }
+    } catch {}
+  }
+
+  // === UTILITIES ===
+  function randRange(min, max) {
+    return min + Math.random() * (max - min);
   }
 
   function lerpColor(a, b, t) {
@@ -66,18 +120,8 @@
     return `rgb(${r},${g},${b})`;
   }
 
-  function makeSky(height) {
-    const t = Math.min(1, height / 4000);
-    const top = lerpColor([135, 206, 250], [10, 8, 40], t);
-    const bottom = lerpColor([255, 236, 179], [40, 20, 70], t);
-    return { top, bottom, spaceT: t };
-  }
-
-  function randRange(min, max) {
-    return min + Math.random() * (max - min);
-  }
-
-  let state = 'menu'; // 'menu' | 'playing' | 'gameover'
+  // === GAME STATE ===
+  let state = 'menu';
   let score = 0;
   let highScore = 0;
   try {
@@ -85,57 +129,129 @@
   } catch {
     highScore = 0;
   }
-  bestPill.textContent = `Best ${highScore}`;
+  bestPill.textContent = `Рекорд ${highScore}`;
 
-  let player = { x: GAME_WIDTH / 2, y: GAME_HEIGHT - 100, vy: 0, vx: 0, facing: 1, squash: 1 };
+  let player = { x: GAME_WIDTH / 2, y: GAME_HEIGHT - 100, vy: 0, vx: 0, facing: 1 };
   let platforms = [];
+  let enemies = [];
+  let particles = [];
+  let peas = [];
   let stars = [];
   let cameraY = 0;
   let maxHeight = 0;
   let highestPlatformY = 0;
+  let peasCollected = 0;
   const keys = { left: false, right: false };
 
+  // === SKY GRADIENT ===
+  function makeSky(height) {
+    const t = Math.min(1, height / 5000);
+    const top = lerpColor([135, 206, 250], [15, 10, 45], t);
+    const bottom = lerpColor([255, 220, 150], [45, 25, 80], t);
+    return { top, bottom, spaceT: t };
+  }
+
+  // === PLATFORM SPAWNING ===
   function spawnPlatform(y) {
     const roll = Math.random();
     let type = 'normal';
-    if (roll > 0.92) type = 'spring';
-    else if (roll > 0.78) type = 'breaking';
-    else if (roll > 0.58) type = 'moving';
+    if (roll > 0.94) type = 'spring';
+    else if (roll > 0.82) type = 'breaking';
+    else if (roll > 0.65) type = 'moving';
+    else if (roll > 0.55) type = 'trident';
 
     platforms.push({
       x: randRange(PLATFORM_WIDTH / 2, GAME_WIDTH - PLATFORM_WIDTH / 2),
       y,
       type,
       broken: false,
+      breakTimer: 0,
       dir: Math.random() > 0.5 ? 1 : -1,
+    });
+
+    // Spawn pea on some platforms
+    if (Math.random() > 0.7) {
+      peas.push({
+        x: randRange(PLATFORM_WIDTH / 2 + 20, GAME_WIDTH - PLATFORM_WIDTH / 2 - 20),
+        y: y - 40,
+        collected: false,
+      });
+    }
+  }
+
+  // === ENEMY SPAWNING ===
+  function spawnEnemy(y) {
+    const types = ['spike', 'snake', 'dragon', 'golem'];
+    const type = types[Math.floor(Math.random() * types.length)];
+    enemies.push({
+      x: randRange(50, GAME_WIDTH - 50),
+      y,
+      type,
+      dir: Math.random() > 0.5 ? 1 : -1,
+      vx: randRange(1, 2.5),
     });
   }
 
+  // === PARTICLE SYSTEM ===
+  function spawnParticles(x, y, color, count = 8) {
+    for (let i = 0; i < count; i++) {
+      particles.push({
+        x,
+        y,
+        vx: randRange(-3, 3),
+        vy: randRange(-4, 1),
+        life: 1,
+        color,
+        size: randRange(3, 7),
+      });
+    }
+  }
+
+  // === RESET GAME ===
   function resetGame() {
     platforms = [];
-    stars = Array.from({ length: 60 }, () => ({
+    enemies = [];
+    particles = [];
+    peas = [];
+    peasCollected = 0;
+
+    stars = Array.from({ length: 80 }, () => ({
       x: Math.random() * GAME_WIDTH,
-      y: Math.random() * GAME_HEIGHT * 4 - GAME_HEIGHT * 3,
-      r: randRange(0.5, 1.8),
+      y: Math.random() * GAME_HEIGHT * 5 - GAME_HEIGHT * 4,
+      r: randRange(0.5, 2),
       twinkle: Math.random() * Math.PI * 2,
     }));
+
     cameraY = 0;
     maxHeight = 0;
 
-    platforms.push({ x: GAME_WIDTH / 2, y: GAME_HEIGHT - 60, type: 'normal', broken: false, dir: 1 });
-    let y = GAME_HEIGHT - 140;
-    while (y > -GAME_HEIGHT * 3) {
+    // Starting platform
+    platforms.push({ x: GAME_WIDTH / 2, y: GAME_HEIGHT - 50, type: 'normal', broken: false, dir: 1 });
+
+    let y = GAME_HEIGHT - 120;
+    let enemyChance = 0;
+    while (y > -GAME_HEIGHT * 4) {
       spawnPlatform(y);
-      y -= randRange(55, 95);
+
+      // Enemies start appearing after some height
+      enemyChance += 0.002;
+      if (Math.random() < enemyChance && enemyChance > 0.05) {
+        spawnEnemy(y - 80);
+        enemyChance = 0;
+      }
+
+      y -= randRange(50, 90);
     }
     highestPlatformY = y;
 
-    player = { x: GAME_WIDTH / 2, y: GAME_HEIGHT - 100, vy: JUMP_VELOCITY, vx: 0, facing: 1, squash: 1 };
+    player = { x: GAME_WIDTH / 2, y: GAME_HEIGHT - 100, vy: JUMP_VELOCITY, vx: 0, facing: 1 };
     score = 0;
     scorePill.textContent = '0';
   }
 
+  // === START GAME ===
   function startGame() {
+    if (!spritesLoaded) return;
     getAudio();
     resetGame();
     state = 'playing';
@@ -143,35 +259,37 @@
     overlay.classList.add('hidden-overlay');
   }
 
+  // === END GAME ===
   function endGame() {
     state = 'gameover';
     gameFrame.classList.remove('playing');
-    const finalScore = Math.floor(maxHeight / 10);
+    const finalScore = Math.floor(maxHeight / 10) + peasCollected * 10;
     score = finalScore;
+
     if (finalScore > highScore) {
       highScore = finalScore;
       try {
         localStorage.setItem(HIGH_SCORE_KEY, String(highScore));
-      } catch {
-        /* localStorage may be unavailable */
-      }
+      } catch {}
     }
-    bestPill.textContent = `Best ${highScore}`;
+    bestPill.textContent = `Рекорд ${highScore}`;
 
-    overlayTitle.textContent = '💥 Game Over';
+    overlayTitle.textContent = 'Гру завершено!';
     overlayScore.classList.remove('hidden');
-    overlayScore.innerHTML = `Score: <b>${finalScore}</b> &middot; Best: <span class="best-value">${highScore}</span>`;
+    overlayScore.innerHTML = `Рахунок: <b>${finalScore}</b> | Рекорд: <span class="best-value">${highScore}</span>`;
     overlayHint.classList.add('hidden');
-    playBtn.textContent = 'Play Again';
+    playBtn.textContent = 'Грати знову';
     overlay.classList.remove('hidden-overlay');
 
-    playTone(220, 0.25, 'sawtooth', 0.12);
-    setTimeout(() => playTone(140, 0.35, 'sawtooth', 0.12), 120);
+    playTone(220, 0.25, 'sawtooth', 0.08);
+    setTimeout(() => playTone(140, 0.35, 'sawtooth', 0.08), 120);
   }
 
+  // === UPDATE ===
   function update() {
     if (state !== 'playing') return;
 
+    // Player movement
     if (keys.left) {
       player.vx = -MOVE_SPEED;
       player.facing = -1;
@@ -179,166 +297,248 @@
       player.vx = MOVE_SPEED;
       player.facing = 1;
     } else {
-      player.vx *= 0.85;
+      player.vx *= 0.88;
     }
 
     player.x += player.vx;
-    if (player.x < -PLAYER_RADIUS) player.x = GAME_WIDTH + PLAYER_RADIUS;
-    if (player.x > GAME_WIDTH + PLAYER_RADIUS) player.x = -PLAYER_RADIUS;
 
+    // Screen wrap
+    if (player.x < -PLAYER_WIDTH / 2) player.x = GAME_WIDTH + PLAYER_WIDTH / 2;
+    if (player.x > GAME_WIDTH + PLAYER_WIDTH / 2) player.x = -PLAYER_WIDTH / 2;
+
+    // Gravity
     player.vy += GRAVITY;
     player.y += player.vy;
-    player.squash += (1 - player.squash) * 0.2;
 
+    // Camera follow
     const screenY = player.y - cameraY;
-    if (screenY < GAME_HEIGHT * 0.4) {
-      const delta = GAME_HEIGHT * 0.4 - screenY;
+    if (screenY < GAME_HEIGHT * 0.35) {
+      const delta = GAME_HEIGHT * 0.35 - screenY;
       cameraY -= delta;
       maxHeight = Math.max(maxHeight, -cameraY);
-      score = Math.floor(maxHeight / 10);
+      score = Math.floor(maxHeight / 10) + peasCollected * 10;
       scorePill.textContent = String(score);
     }
 
+    // Platform collision
     for (const p of platforms) {
-      if (p.broken) continue;
+      if (p.broken) {
+        p.breakTimer += 0.1;
+        continue;
+      }
+
       if (p.type === 'moving') {
-        p.x += p.dir * 1.6;
+        p.x += p.dir * 2;
         if (p.x < PLATFORM_WIDTH / 2 || p.x > GAME_WIDTH - PLATFORM_WIDTH / 2) p.dir *= -1;
       }
 
       if (player.vy > 0) {
-        const withinX = Math.abs(player.x - p.x) < PLATFORM_WIDTH / 2 + PLAYER_RADIUS * 0.5;
-        const withinY = player.y + PLAYER_RADIUS > p.y && player.y + PLAYER_RADIUS < p.y + PLATFORM_HEIGHT + player.vy;
+        const pw = PLATFORM_WIDTH;
+        const ph = PLATFORM_HEIGHT;
+        const withinX = player.x > p.x - pw / 2 - PLAYER_WIDTH / 3 && player.x < p.x + pw / 2 + PLAYER_WIDTH / 3;
+        const withinY = player.y + PLAYER_HEIGHT / 2 > p.y && player.y + PLAYER_HEIGHT / 2 < p.y + ph + player.vy + 5;
+
         if (withinX && withinY) {
           if (p.type === 'breaking') {
             p.broken = true;
-            playTone(180, 0.15, 'square', 0.08);
+            spawnParticles(p.x, p.y, '#8B4513', 12);
+            playTone(180, 0.12, 'square', 0.06);
           } else if (p.type === 'spring') {
             player.vy = SPRING_VELOCITY;
-            player.squash = 1.4;
-            playTone(660, 0.12, 'triangle', 0.1);
-            continue;
+            spawnParticles(p.x, p.y, '#FFD700', 6);
+            playTone(880, 0.15, 'triangle', 0.08);
           } else {
             player.vy = JUMP_VELOCITY;
-            player.squash = 1.3;
-            playTone(440, 0.08, 'sine', 0.08);
+            spawnParticles(p.x, p.y, '#90EE90', 4);
+            playTone(440, 0.08, 'sine', 0.06);
           }
         }
       }
     }
-    platforms = platforms.filter((p) => !p.broken);
 
-    const topVisible = cameraY;
-    while (highestPlatformY > topVisible - GAME_HEIGHT) {
-      highestPlatformY -= randRange(55, 95);
-      spawnPlatform(highestPlatformY);
+    // Pea collection
+    for (const pea of peas) {
+      if (pea.collected) continue;
+      const dx = player.x - pea.x;
+      const dy = (player.y - cameraY) - (pea.y - cameraY);
+      if (Math.abs(dx) < 30 && Math.abs(dy) < 30) {
+        pea.collected = true;
+        peasCollected++;
+        spawnParticles(pea.x, pea.y - cameraY, '#90EE90', 8);
+        playTone(660, 0.1, 'sine', 0.08);
+      }
     }
-    platforms = platforms.filter((p) => p.y - cameraY < GAME_HEIGHT + 60);
 
-    if (player.y - cameraY > GAME_HEIGHT + 40) {
+    // Enemy collision
+    for (const e of enemies) {
+      e.x += e.dir * e.vx;
+      if (e.x < 40 || e.x > GAME_WIDTH - 40) e.dir *= -1;
+
+      const ey = e.y - cameraY;
+      if (ey > -100 && ey < GAME_HEIGHT + 100) {
+        const dx = Math.abs(player.x - e.x);
+        const dy = Math.abs((player.y) - e.y);
+        const hitDist = e.type === 'spike' ? 35 : 45;
+
+        if (dx < hitDist && dy < hitDist) {
+          endGame();
+          return;
+        }
+      }
+    }
+
+    // Generate new platforms
+    while (highestPlatformY > cameraY - GAME_HEIGHT) {
+      highestPlatformY -= randRange(50, 90);
+      spawnPlatform(highestPlatformY);
+
+      if (Math.random() < 0.08) {
+        spawnEnemy(highestPlatformY - 80);
+      }
+    }
+
+    // Cleanup off-screen objects
+    platforms = platforms.filter(p => p.y - cameraY < GAME_HEIGHT + 100 && !p.broken);
+    enemies = enemies.filter(e => e.y - cameraY < GAME_HEIGHT + 100);
+    peas = peas.filter(p => !p.collected && p.y - cameraY < GAME_HEIGHT + 100);
+
+    // Update particles
+    particles = particles.filter(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.15;
+      p.life -= 0.03;
+      return p.life > 0;
+    });
+
+    // Fall death
+    if (player.y - cameraY > GAME_HEIGHT + 50) {
       endGame();
     }
   }
 
-  function drawPlatform(p, py) {
-    const w = PLATFORM_WIDTH;
-    const h = PLATFORM_HEIGHT;
-    const x = p.x - w / 2;
-
+  // === DRAW SPRITE ===
+  function drawSprite(sprite, x, y, width, height, flipX = false) {
+    if (!sprite || !sprite.complete) return;
     ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,0.25)';
-    ctx.shadowBlur = 6;
-    ctx.shadowOffsetY = 4;
-
-    const colors = {
-      normal: ['#7ee787', '#2f9e44'],
-      moving: ['#74c0fc', '#1971c2'],
-      breaking: ['#e8a15a', '#a5591a'],
-      spring: ['#ffe066', '#e8a300'],
-    };
-    const [light, dark] = colors[p.type];
-    const g = ctx.createLinearGradient(x, py, x, py + h);
-    g.addColorStop(0, light);
-    g.addColorStop(1, dark);
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.roundRect(x, py, w, h, 6);
-    ctx.fill();
+    if (flipX) {
+      ctx.translate(x + width / 2, y);
+      ctx.scale(-1, 1);
+      ctx.drawImage(sprite, -width / 2, 0, width, height);
+    } else {
+      ctx.drawImage(sprite, x, y, width, height);
+    }
     ctx.restore();
-
-    ctx.fillStyle = 'rgba(255,255,255,0.35)';
-    ctx.beginPath();
-    ctx.roundRect(x + 3, py + 1.5, w - 6, h * 0.35, 4);
-    ctx.fill();
-
-    if (p.type === 'breaking') {
-      ctx.strokeStyle = 'rgba(80,40,10,0.5)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(p.x - 8, py + 2);
-      ctx.lineTo(p.x, py + h - 2);
-      ctx.lineTo(p.x + 10, py + 3);
-      ctx.stroke();
-    }
-
-    if (p.type === 'spring') {
-      ctx.strokeStyle = '#7a5200';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      for (let i = 0; i < 3; i++) {
-        const sy = py - 2 - i * 4;
-        ctx.moveTo(p.x - 6, sy);
-        ctx.lineTo(p.x + 6, sy - 3);
-      }
-      ctx.stroke();
-    }
   }
 
+  // === DRAW PLATFORM ===
+  function drawPlatform(p) {
+    const py = p.y - cameraY;
+    if (py < -50 || py > GAME_HEIGHT + 50) return;
+
+    let sprite;
+    let w = PLATFORM_WIDTH;
+    let h = PLATFORM_HEIGHT;
+
+    switch (p.type) {
+      case 'spring':
+        sprite = sprites.platformSpring;
+        h = 35;
+        break;
+      case 'breaking':
+        sprite = sprites.platformBreaking;
+        if (p.broken) {
+          ctx.globalAlpha = 1 - p.breakTimer;
+        }
+        break;
+      case 'trident':
+        sprite = sprites.platformTrident;
+        w = 80;
+        h = 30;
+        break;
+      case 'moving':
+        sprite = sprites.platformGold;
+        break;
+      default:
+        sprite = sprites.platformWood;
+    }
+
+    if (sprite && sprite.complete) {
+      drawSprite(sprite, p.x - w / 2, py, w, h);
+    } else {
+      // Fallback rectangle
+      ctx.fillStyle = p.type === 'spring' ? '#FFD700' : '#8B4513';
+      ctx.fillRect(p.x - w / 2, py, w, h);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // === DRAW PLAYER ===
   function drawPlayer() {
-    const x = player.x;
-    const y = player.y - cameraY;
-    const stretch = player.vy < 0 ? 1.15 : 1;
-    const rx = PLAYER_RADIUS * (2 - player.squash) * 0.95;
-    const ry = PLAYER_RADIUS * player.squash * stretch;
+    const x = player.x - PLAYER_WIDTH / 2;
+    const y = player.y - cameraY - PLAYER_HEIGHT / 2;
 
-    ctx.save();
-    ctx.globalAlpha = 0.2;
-    ctx.fillStyle = '#000';
-    ctx.beginPath();
-    ctx.ellipse(x, y + ry + 4, rx * 0.8, 5, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+    let sprite;
+    if (player.vy < -2) {
+      sprite = sprites.playerJump;
+    } else if (player.vy > 3) {
+      sprite = sprites.playerFall;
+    } else {
+      sprite = sprites.playerIdle;
+    }
 
-    const bodyGrad = ctx.createRadialGradient(x - rx * 0.3, y - ry * 0.3, 2, x, y, rx * 1.4);
-    bodyGrad.addColorStop(0, '#9be564');
-    bodyGrad.addColorStop(1, '#4f9d1f');
-    ctx.fillStyle = bodyGrad;
-    ctx.beginPath();
-    ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
-    ctx.fill();
+    const flip = player.facing < 0;
 
-    ctx.strokeStyle = '#3d7a17';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(x - rx * 0.5, y + ry * 0.7);
-    ctx.lineTo(x - rx * 0.7, y + ry + 6);
-    ctx.moveTo(x + rx * 0.5, y + ry * 0.7);
-    ctx.lineTo(x + rx * 0.7, y + ry + 6);
-    ctx.stroke();
-
-    const eyeOffsetX = player.facing * rx * 0.35;
-    ctx.fillStyle = '#fff';
-    ctx.beginPath();
-    ctx.ellipse(x + eyeOffsetX - 4, y - ry * 0.2, 5, 6, 0, 0, Math.PI * 2);
-    ctx.ellipse(x + eyeOffsetX + 6, y - ry * 0.2, 5, 6, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#1a1a1a';
-    ctx.beginPath();
-    ctx.arc(x + eyeOffsetX - 4 + player.facing * 1.5, y - ry * 0.2, 2.4, 0, Math.PI * 2);
-    ctx.arc(x + eyeOffsetX + 6 + player.facing * 1.5, y - ry * 0.2, 2.4, 0, Math.PI * 2);
-    ctx.fill();
+    if (sprite && sprite.complete) {
+      drawSprite(sprite, x, y, PLAYER_WIDTH, PLAYER_HEIGHT, flip);
+    } else {
+      // Fallback circle
+      ctx.fillStyle = '#E74C3C';
+      ctx.beginPath();
+      ctx.arc(player.x, player.y - cameraY, 20, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
+  // === DRAW ENEMY ===
+  function drawEnemy(e) {
+    const ey = e.y - cameraY;
+    if (ey < -100 || ey > GAME_HEIGHT + 100) return;
+
+    let sprite;
+    let size = 50;
+
+    switch (e.type) {
+      case 'snake':
+        sprite = sprites.enemySnake;
+        size = 60;
+        break;
+      case 'dragon':
+        sprite = sprites.enemyDragon;
+        size = 70;
+        break;
+      case 'golem':
+        sprite = sprites.enemyGolem;
+        size = 55;
+        break;
+      default:
+        sprite = sprites.enemySpike;
+        size = 45;
+    }
+
+    const flip = e.dir < 0;
+
+    if (sprite && sprite.complete) {
+      drawSprite(sprite, e.x - size / 2, ey - size / 2, size, size, flip);
+    } else {
+      ctx.fillStyle = '#E74C3C';
+      ctx.beginPath();
+      ctx.arc(e.x, ey, size / 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // === DRAW ===
   function draw() {
     const sky = makeSky(maxHeight);
     const grad = ctx.createLinearGradient(0, 0, 0, GAME_HEIGHT);
@@ -347,14 +547,15 @@
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-    if (sky.spaceT > 0.15) {
+    // Stars
+    if (sky.spaceT > 0.1) {
       ctx.save();
-      ctx.globalAlpha = Math.min(1, (sky.spaceT - 0.15) * 1.4);
+      ctx.globalAlpha = Math.min(1, (sky.spaceT - 0.1) * 2);
       for (const s of stars) {
-        const sy = s.y - cameraY * 0.3;
-        const wrapped = ((sy % (GAME_HEIGHT * 4)) + GAME_HEIGHT * 4) % (GAME_HEIGHT * 4);
+        const sy = s.y - cameraY * 0.2;
+        const wrapped = ((sy % (GAME_HEIGHT * 5)) + GAME_HEIGHT * 5) % (GAME_HEIGHT * 5);
         if (wrapped > GAME_HEIGHT) continue;
-        const twinkle = 0.5 + 0.5 * Math.sin(s.twinkle + performance.now() / 500);
+        const twinkle = 0.5 + 0.5 * Math.sin(s.twinkle + performance.now() / 400);
         ctx.fillStyle = `rgba(255,255,255,${twinkle})`;
         ctx.beginPath();
         ctx.arc(s.x, wrapped, s.r, 0, Math.PI * 2);
@@ -363,22 +564,54 @@
       ctx.restore();
     }
 
+    // Platforms
     for (const p of platforms) {
-      const py = p.y - cameraY;
-      if (py < -30 || py > GAME_HEIGHT + 30) continue;
-      drawPlatform(p, py);
+      drawPlatform(p);
     }
 
+    // Peas
+    for (const pea of peas) {
+      if (pea.collected) continue;
+      const py = pea.y - cameraY;
+      if (py < -30 || py > GAME_HEIGHT + 30) continue;
+
+      if (sprites.uiPea && sprites.uiPea.complete) {
+        drawSprite(sprites.uiPea, pea.x - 15, py - 15, 30, 30);
+      } else {
+        ctx.fillStyle = '#90EE90';
+        ctx.beginPath();
+        ctx.arc(pea.x, py, 12, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Enemies
+    for (const e of enemies) {
+      drawEnemy(e);
+    }
+
+    // Player
     drawPlayer();
+
+    // Particles
+    for (const p of particles) {
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
   }
 
+  // === GAME LOOP ===
   function loop() {
     update();
     draw();
     requestAnimationFrame(loop);
   }
 
-  // input
+  // === INPUT ===
   window.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keys.left = true;
     if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.right = true;
@@ -387,20 +620,15 @@
       startGame();
     }
   });
+
   window.addEventListener('keyup', (e) => {
     if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keys.left = false;
     if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.right = false;
   });
 
   function bindTouch(btn, side) {
-    const press = (e) => {
-      e.preventDefault();
-      keys[side] = true;
-    };
-    const release = (e) => {
-      e.preventDefault();
-      keys[side] = false;
-    };
+    const press = (e) => { e.preventDefault(); keys[side] = true; };
+    const release = (e) => { e.preventDefault(); keys[side] = false; };
     btn.addEventListener('pointerdown', press);
     btn.addEventListener('pointerup', release);
     btn.addEventListener('pointerleave', release);
@@ -411,12 +639,13 @@
 
   playBtn.addEventListener('click', startGame);
 
-  // initial menu draw (static preview)
-  resetGame();
-  overlayTitle.textContent = '🚀 Doodle Jump';
-  overlayScore.classList.add('hidden');
-  overlayHint.classList.remove('hidden');
-  playBtn.textContent = 'Play';
-
-  requestAnimationFrame(loop);
+  // === INIT ===
+  loadSprites(() => {
+    overlayTitle.textContent = 'Котигорошко';
+    overlayScore.classList.add('hidden');
+    overlayHint.classList.remove('hidden');
+    overlayHint.textContent = 'Використовуй ← → або A/D для руху. Стрибай по платформах якомога вище!';
+    playBtn.textContent = 'Грати';
+    requestAnimationFrame(loop);
+  });
 })();
